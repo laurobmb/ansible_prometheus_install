@@ -1,0 +1,132 @@
+---
+- hosts: prometeus_server
+  vars:
+
+    servidor: 'prometheus_servidor.lab.example.com'
+
+    prometheus_checksum: 19d29910fd0e51765d47b59b9276df016441ad4c6c48e3b27e5aa9acb5d1da26
+    prometheus_version: 2.9.2
+
+    senha_prometheus: 19d29910fd0e51
+    srv: 10.1.14.177
+
+    usuario_web: admin
+    senha_web: 19d29910fd0e51
+
+  tasks:
+
+    - name: Instalação de repositorio EPEL
+      yum: name=epel-release state=latest
+
+    - yum:
+        name: "{{item}}"
+        state: present
+      with_items:
+        - httpd-tools
+        - vim
+        - nginx
+        - python-pip
+
+    - name: Instalando PIPs
+      pip:
+        state: present
+        name: 
+          - passlib
+
+    - name: download prometheus binary to local folder
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        checksum: "sha256:{{ prometheus_checksum }}"
+
+    - name: Adicionando grupo prometheus
+      group:
+        name: prometheus
+        state: present
+
+    - name: Acionando usuarios
+      user: 
+        name: prometheus
+        password: "{{ senha_prometheus }}"
+        create_home: no
+        shell: /bin/false
+
+    - name: Criando diretorios prometheus
+      file:
+        path: '{{item}}'
+        owner: prometheus
+        group: prometheus
+        state: directory
+        mode: 0740
+      with_items:
+        - /etc/prometheus
+        - /var/lib/prometheus
+        - /tmp/prometheus
+
+    - name: Extract prometheus
+      unarchive:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/prometheus"
+        dest: "/usr/local/bin/prometheus"
+        owner: prometheus
+        group: prometheus
+        mode: 0740              
+        remote_src: yes
+
+    - copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/promtool"
+        dest: "/usr/local/bin/promtool"
+        owner: prometheus
+        group: prometheus
+        mode: 0740       
+        remote_src: yes        
+
+    - command: cp -r "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/consoles" "/etc/prometheus"
+
+    - command: cp -r "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/console_libraries" "/etc/prometheus"
+
+    - file:
+        path: /etc/prometheus
+        owner: prometheus
+        group: prometheus
+        mode: 0740
+        recurse: yes
+
+    - template: 
+        src: ./files/prometheus.yml
+        dest: /etc/prometheus/prometheus.yml
+        owner: prometheus
+        group: prometheus
+        mode: 0640
+    
+    - template:
+        src: ./files/prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+        owner: prometheus
+        group: prometheus
+        mode: 0640
+
+    - name: Recarregando o systemctl
+      command: systemctl daemon-reload
+
+    - htpasswd:
+        path: /etc/nginx/htpasswd.users
+        name: "{{usuario_web}}"
+        password: "{{senha_web}}"
+        owner: root
+        group: nginx
+        mode: 0640
+
+    - name: NGINX prometheus
+      template: src=./files/prometheus.conf dest=/etc/nginx/conf.d/prometheus.conf backup=yes
+
+    - name: Iniciar os servicos
+      systemd: state=restarted enabled=yes name="{{ item }}"
+      with_items:
+        - prometheus.service
+        - nginx.service
+

@@ -1,0 +1,57 @@
+---
+- hosts: prometeus_server
+  vars:
+    node_exporter_checksum: d2e00d805dbfdc67e7291ce2d2ff151f758dd7401dd993411ff3818d0e231489
+    node_exporter_version: 0.17.0
+
+    senha: 19d29910fd0e51
+    srv: 10.1.14.177
+
+  tasks:
+    - name: download Node Export binary to local folder
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{node_exporter_version}}/node_exporter-{{node_exporter_version}}.linux-amd64.tar.gz"
+        dest: "/tmp/node_exporter-{{node_exporter_version}}.linux-amd64.tar.gz"
+        checksum: "sha256:{{ node_exporter_checksum }}"
+
+    - name: Adicionando grupo node_exporter
+      group:
+        name: node_exporter
+        state: present
+
+    - name: Acionando usuarios node_exporter
+      user: 
+        name: node_exporter
+        password: "{{ senha }}"
+        create_home: no
+        shell: /bin/false
+
+    - template:
+        src: ./files/node_exporter.service
+        dest: /etc/systemd/system/node_exporter.service
+        owner: node_exporter
+        group: node_exporter
+        mode: 0640
+
+    - name: Extract node_exporter
+      unarchive:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - command: mv "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter" "/usr/local/bin/"
+
+    - file:
+        path: /usr/local/bin/node_exporter
+        owner: node_exporter
+        group: node_exporter
+        mode: 0740
+
+    - name: Recarregando o systemctl
+      command: systemctl daemon-reload
+
+    - name: Iniciar os servicos
+      systemd: state=restarted enabled=yes name="{{ item }}"
+      with_items:
+        - prometheus.service
+        - node_exporter.service
